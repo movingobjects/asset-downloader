@@ -28,13 +28,13 @@ Then scaffold a config and add a script:
 
 ```bash
 npx asset-sync --init
-npm pkg set scripts.sync=asset-sync
+npm pkg set scripts.assets:sync=asset-sync
 ```
 
 Point the config at your data sources (see [Configuration](#configuration)), and sync whenever you need fresh content:
 
 ```bash
-npm run sync
+npm run assets:sync
 ```
 
 Paths in the config are resolved from the project directory, so `"outDir": "./public/assets"` puts the files where the app expects them.
