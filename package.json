@@ -1,31 +1,30 @@
 {
-  "name": "asset-downloader",
-  "version": "1.0.1",
-  "description": "Downloads JSON data sources and the assets they reference",
+  "name": "asset-sync",
+  "version": "1.0.0",
+  "description": "Syncs JSON data sources and the assets they reference into a project",
   "type": "module",
-  "main": "download.js",
   "bin": {
-    "asset-sync": "download.js"
+    "asset-sync": "asset-sync.js"
   },
   "engines": {
     "node": ">=22"
   },
   "files": [
-    "download.js",
+    "asset-sync.js",
     "lib"
   ],
   "scripts": {
-    "start": "node download.js",
+    "start": "node asset-sync.js",
     "test": "node --test"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/movingobjects/asset-downloader.git"
+    "url": "git+https://github.com/movingobjects/asset-sync.git"
   },
   "author": "Scott Thiessen",
   "license": "UNLICENSED",
   "bugs": {
-    "url": "https://github.com/movingobjects/asset-downloader/issues"
+    "url": "https://github.com/movingobjects/asset-sync/issues"
   },
-  "homepage": "https://github.com/movingobjects/asset-downloader"
+  "homepage": "https://github.com/movingobjects/asset-sync"
 }

@@ -1,8 +1,8 @@
-# Asset Downloader
+# Asset Sync
 
 Command-line tool that creates local copies of JSON data sources and the image/video/etc. files they reference.
 
-The downloader:
+Asset Sync:
 
 - Reads any number of JSON API endpoints
 - Finds asset URLs inside them, based on the JSON field paths you specify
@@ -19,7 +19,7 @@ Requires Node 22 or newer. It has no dependencies of its own.
 Install it as a dev dependency, pinned to a version tag:
 
 ```bash
-npm install --save-dev github:movingobjects/asset-downloader#v1.0.0
+npm install --save-dev github:movingobjects/asset-sync#v1.0.0
 ```
 
 Pinning to a tag matters: the version is recorded in the project's `package-lock.json`, so every machine that runs `npm ci` — every kiosk — gets the exact tool that project was tested against.
@@ -31,7 +31,7 @@ npx asset-sync --init
 npm pkg set scripts.assets:sync=asset-sync
 ```
 
-Point the config at your data sources (see [Configuration](#configuration)), and sync whenever you need fresh content:
+That writes `asset-sync.config.json` into the project root. Point it at your data sources (see [Configuration](#configuration)), and sync whenever you need fresh content:
 
 ```bash
 npm run assets:sync
@@ -42,11 +42,11 @@ Paths in the config are resolved from the project directory, so `"outDir": "./pu
 ## Options
 
 ```text
-  -c, --config <file>    Config file to read       (default: config.json)
+  -c, --config <file>    Config file to read       (default: asset-sync.config.json)
   -j, --json-only        Skip assets, JSON only
   -n, --concurrency <n>  Parallel downloads        (default: 8)
       --dry-run          Report without writing
-      --init             Write a starter config.json here
+      --init             Write a starter asset-sync.config.json here
   -h, --help             Show this message
   -v, --version          Show version
 ```
@@ -55,7 +55,7 @@ Paths in the config are resolved from the project directory, so `"outDir": "./pu
 
 ## All or nothing, per source
 
-A source is written into the project **only if its JSON and every one of its assets arrives intact**. If anything at all fails — a dead endpoint, a 404, a connection that drops mid-file — that source is left exactly as it already was on disk, and the downloader moves on to the next one.
+A source is written into the project **only if its JSON and every one of its assets arrives intact**. If anything at all fails — a dead endpoint, a 404, a connection that drops mid-file — that source is left exactly as it already was on disk, and Asset Sync moves on to the next one.
 
 This is deliberate: for a long-running display, old data that works beats new data that doesn't.
 
@@ -151,15 +151,15 @@ File extensions come from the asset's final URL after redirects, falling back to
 ## Development
 
 ```bash
-git clone https://github.com/movingobjects/asset-downloader
-cd asset-downloader
+git clone https://github.com/movingobjects/asset-sync
+cd asset-sync
 node --test
-node download.js --config config.example.json
+node asset-sync.js --config asset-sync.config.example.json
 ```
 
 | File | Contains |
 | --- | --- |
-| [`download.js`](download.js) | CLI, and the stages of syncing one source |
+| [`asset-sync.js`](asset-sync.js) | CLI, and the stages of syncing one source |
 | [`lib/assets.js`](lib/assets.js) | Finding asset URLs in JSON, naming them, rewriting them |
 | [`lib/config.js`](lib/config.js) | Reading and validating the config file |
 | [`lib/net.js`](lib/net.js) | Fetching, retries, and the download pool |

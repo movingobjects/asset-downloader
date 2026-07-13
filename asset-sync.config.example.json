@@ -1,5 +1,5 @@
 {
-  "outDir": "~/Desktop/Asset Downloader example/assets",
+  "outDir": "~/Desktop/Asset Sync example/assets",
   "publicPath": "assets",
   "sources": [
     {

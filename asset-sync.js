@@ -17,7 +17,7 @@ async function run(options) {
   const config = await loadConfig(options.config);
   log.intro(config, options);
 
-  const tempDir = await mkdtemp(path.join(tmpdir(), 'asset-downloader-'));
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'asset-sync-'));
   const skipped = [];
 
   try {
@@ -116,6 +116,8 @@ async function publish(staging, dest, source, hasAssets) {
 
 // CLI
 
+const CONFIG_FILE = 'asset-sync.config.json';
+
 const USAGE = `
   Usage: asset-sync [options]
 
@@ -126,11 +128,11 @@ const USAGE = `
   cleanly. If any fails, that source is left untouched and the run exits 1.
 
   Options:
-    -c, --config <file>   Config file to read       (default: config.json)
+    -c, --config <file>   Config file to read       (default: ${CONFIG_FILE})
     -j, --json-only       Skip assets, JSON only
     -n, --concurrency <n> Parallel downloads        (default: 8)
         --dry-run         Report without writing
-        --init            Write a starter config.json here
+        --init            Write a starter ${CONFIG_FILE} here
     -h, --help            Show this message
     -v, --version         Show version
 `;
@@ -151,7 +153,7 @@ const TEMPLATE = `{
 
 /** Writes a starter config into the current project, without ever clobbering one. */
 async function init() {
-  const file = path.resolve('config.json');
+  const file = path.resolve(CONFIG_FILE);
 
   try {
     await writeFile(file, TEMPLATE, { flag: 'wx' });
@@ -170,7 +172,7 @@ async function main() {
   try {
     ({ values: args } = parseArgs({
       options: {
-        config: { type: 'string', short: 'c', default: 'config.json' },
+        config: { type: 'string', short: 'c', default: CONFIG_FILE },
         'json-only': { type: 'boolean', short: 'j', default: false },
         concurrency: { type: 'string', short: 'n', default: '8' },
         'dry-run': { type: 'boolean', default: false },
