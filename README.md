@@ -1,101 +1,104 @@
 # Asset Downloader
 
-Command-line Node app that creates local copies of JSON data sources and their image/video/etc asset files.
-
-## Process
+Command-line tool that creates local copies of JSON data sources and the image/video/etc. files they reference.
 
 The downloader:
 
-- Reads from any number of JSON API endpoints
-- Compiles a list of asset URLs, based on specified JSON nodes
-- Downloads assets to a temporary folder on the local machine, naming the files to match the JSON schema
-- Rewrites the paths of the assets in the JSON file(s) to match the local path, and saves the JSON file(s) locally
-- Moves fully downloaded JSON and asset files to a specified location on the local machine, overwriting any existing JSON & assets
-- Clears the temporary downloads folder
+- Reads any number of JSON API endpoints
+- Finds asset URLs inside them, based on the JSON field paths you specify
+- Downloads those assets in parallel, naming each file after the field path it came from
+- Rewrites the asset URLs in the JSON to point at the local copies
+- Writes the JSON and assets into your project, replacing what was there before
 
+A source is only written into your project if every one of its assets downloaded intact — see [All or nothing](#all-or-nothing-per-source).
+
+## Requirements
+
+Node 22 or newer. There are no dependencies to install.
 
 ## Quick start
 
-Clone and run the `movingobjects/asset-downloader` repo to get started:
-
 ```bash
-$ git clone https://github.com/movingobjects/asset-downloader
-$ cd asset-downloader
-$ npm install
-$ node download --config config.example.json
+git clone https://github.com/movingobjects/asset-downloader
+cd asset-downloader
+node download.js --config config.example.json
 ```
 
 ## Usage
 
-1. [Configure](#configuration) the downloader in the `config.json` file
-1. Run the downloader:
-```bash
-$ node download
-```
-
-
-### Custom config file
-By default, the app will read its config values from `config.json`. To use a different config file, use the `--config` argument, like so:
+1. Describe your data sources in `config.json` (see [Configuration](#configuration))
+2. Run the downloader:
 
 ```bash
-$ node download --config config.custom.json
+node download.js
 ```
 
-_Note_: The file must be sitting in the project folder.
-
-### JSON only
-To skip all asset downloads and only download the JSON files, use the `-j` (or `--json_only`) argument, like so:
-
-```bash
-$ node download -j
-$ node download --json_only
+```text
+  -c, --config <file>    Config file to read       (default: config.json)
+  -j, --json-only        Skip assets, JSON only
+  -n, --concurrency <n>  Parallel downloads        (default: 8)
+      --dry-run          Report without writing
+  -h, --help             Show this message
+  -v, --version          Show version
 ```
 
-_Note_: This can be used safely to update JSON files without affecting existing `assets` folders.
+`--json-only` refreshes the JSON files without touching existing `assets` folders. `--dry-run` reports exactly what would be fetched and written, without requesting a single asset or touching your disk.
 
-### Temp folder
-If the downloader fails at any point, the `temp` folder will contain whatever data and assets were downloaded before the failure. This folder can be cleared out by running:
+## All or nothing, per source
 
-```bash
-$ npm run clean
-```
+A source is written into the project **only if its JSON and every one of its assets arrives intact**. If anything at all fails — a dead endpoint, a 404, a connection that drops mid-file — that source is left exactly as it already was on disk, and the downloader moves on to the next one.
+
+This is deliberate: for a long-running display, old data that works beats new data that doesn't.
+
+Everything is downloaded to a temporary folder first, and only copied into the project once the whole source is accounted for, so there is no window in which a half-updated source is live. Failures are reported with the URL and the reason, and the run exits `1` if any source was skipped.
 
 ## Configuration
 
-Configuration is made in the `config.json` file. An example [`config.example.json`](config.example.json) file is provided to demonstrate usage.
+```json
+{
+  "outDir": "~/Projects/my-site/public/assets",
+  "publicPath": "assets",
+  "sources": [
+    {
+      "url": "https://example.com/api/stories",
+      "dir": "Stories",
+      "file": "data.json",
+      "assets": ["settings.background.img", "stories.img", "stories.vid", "otherImgs"]
+    }
+  ]
+}
+```
 
-### `projectPath`
-Full local path to the base directory of the relevant project. Rewritten asset paths in the JSON will be relative to this path. You may start the path with `~` to specify the home directory.
+### `outDir`
 
-_**Note**: this directory will **not** be overwritten_.
+Where downloaded files are written on disk. May start with `~` for your home directory.
 
-### `targetFolder`
-Name of the folder within the project directory where all downloaded data should be stored. Typically, this is set to `assets`.
+Within it, each source gets a folder containing its JSON file and an `assets` folder.
 
-_**Note**: this directory will **not** be overwritten_.
+> **Note:** a source's `assets` folder is **replaced** on every run. Anything else in `outDir` is left alone.
 
-### `schemas`
-An array of `schema` objects, each representing a single JSON data format/structure.
+### `publicPath`
 
-A `schema` may specify multiple [`sources`](#sources), so long as the JSON of each [`source`](#sources) follows the same data format/structure.
+The prefix used when rewriting asset URLs inside the JSON — that is, how your app refers to the assets at runtime, which is usually not the same as where they sit on disk.
 
-- `sources`: Array of [`sources`](#sources)
-- `assets`: (optional) Array of [`assets`](#assets)
-    - If omitted, only the JSON for this source will be downloaded
+With the config above, an asset lands on disk at `~/Projects/my-site/public/assets/Stories/assets/stories-1-img.jpg`, and its URL in the JSON becomes `assets/Stories/assets/stories-1-img.jpg`.
+
+Leave it out to make the rewritten paths relative to `outDir` itself.
 
 ### `sources`
-An array of `source` objects, each representing a single JSON API endpoint to read from.
 
-- `url`: Full URL to the JSON endpoint
-- `targetFolder`: Folder name (inside the inside the `schema`'s `targetPath`) where the data & assets for this `source` will be stored. _**Warning**: if a folder of the same name already exists here, its contents **will** be overwritten_.
-- `targetFilename`: Filename of the downloaded JSON data file
+One entry per JSON endpoint.
 
-### `assets`
-An array of strings, each representing a node (or set of nodes) within the JSON where an asset URL is specified.
+- `url` — full URL of the JSON endpoint
+- `dir` — (optional) subfolder of `outDir` for this source's data and assets
+- `file` — (optional) filename for the downloaded JSON (default: `data.json`)
+- `assets` — (optional) field paths to the asset URLs in the JSON. If omitted, only the JSON is downloaded.
 
-Each string is formatted to dig down one node at a time through the JSON to reach a final node with a URL. Node names are separated by `.` (periods) and can represent objects, arrays, or (if at the URL node itself) a text node.
+### `assets` field paths
 
-e.g., the following `assets` array will capture all of the image and video URLs in the JSON below.
+Each string digs down through the JSON one field at a time, separated by `.`, until it reaches a URL. Fields along the way may be objects or arrays; the final field may be a URL string or an array of URL strings.
+
+So this `assets` array captures every image and video URL in the JSON below:
 
 ```json
 "assets": [
@@ -116,21 +119,36 @@ e.g., the following `assets` array will capture all of the image and video URLs 
     }
   },
   "stories": [
-    {
-      "title": "First story",
-      "img": "http://example.com/image-1.jpg"
-    },
-    {
-      "title": "Second story",
-      "img": "http://example.com/image-2.jpg",
-      "vid": "http://example.com/vid-2.mp4"
-    }
+    { "title": "First story", "img": "http://example.com/image-1.jpg" },
+    { "title": "Second story", "img": "http://example.com/image-2.jpg", "vid": "http://example.com/vid-2.mp4" }
   ],
-  "otherImgs": [
-    "http://example.com/other-1.jpg",
-    "http://example.com/other-2.jpg",
-    "http://example.com/other-3.jpg",
-  ]
-
+  "otherImgs": ["http://example.com/other-1.jpg", "http://example.com/other-2.jpg"]
 }
 ```
+
+Downloaded files are named after the path that found them, with array items numbered from 1:
+
+```text
+assets/settings-background-img.png
+assets/stories-1-img.jpg
+assets/stories-2-img.jpg
+assets/stories-2-vid.mp4
+assets/otherImgs-1.jpg
+assets/otherImgs-2.jpg
+```
+
+File extensions come from the asset's final URL after redirects, falling back to its content type. Missing fields are skipped, and a URL referenced more than once is downloaded only once.
+
+## Development
+
+```bash
+node --test
+```
+
+| File | Contains |
+| --- | --- |
+| [`download.js`](download.js) | CLI, and the four stages of a run |
+| [`lib/assets.js`](lib/assets.js) | Finding asset URLs in JSON, naming them, rewriting them |
+| [`lib/config.js`](lib/config.js) | Reading and validating the config file |
+| [`lib/net.js`](lib/net.js) | Fetching, retries, and the download pool |
+| [`lib/log.js`](lib/log.js) | Everything printed to the terminal |

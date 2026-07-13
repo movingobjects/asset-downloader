@@ -1,446 +1,186 @@
 #!/usr/bin/env node
 
-// Requires
+import { copyFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
 
-const colors   = require('colors'),
-      fetch    = require('node-fetch'),
-      fs       = require('fs'),
-      fse      = require('fs-extra'),
-      logBox   = require('log-box'),
-      minimist = require('minimist'),
-      os       = require('os'),
-      progress = require('request-progress'),
-      readline = require('readline'),
-      request  = require('request'),
-      rimraf   = require('rimraf'),
-      rp       = require('request-promise-native');
+import { collectAssetRefs, groupByUrl } from './lib/assets.js';
+import { loadConfig } from './lib/config.js';
+import { check, UserError } from './lib/error.js';
+import * as log from './lib/log.js';
+import { downloadAssets, fetchJson, resolveAssets } from './lib/net.js';
 
-const argv       = minimist(process.argv.slice(2))
-      pkg        = require('./package.json'),
-      configFile = `./` + (argv.config ? argv.config : `config.json`),
-      config     = require(configFile);
+async function run(options) {
+  const config = await loadConfig(options.config);
+  log.intro(config, options);
 
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'asset-downloader-'));
+  const skipped = [];
 
-// Constants
-
-const DL_BAR_LENGTH           = 40,
-      CLEAR_TEMP_FOLDER_DELAY = 500; // in Windows, files are locked after being
-                                     // copied and seem to only be able to be deleted
-                                     // after a delay, however short
-
-
-// Vars
-
-var tempFolder = `temp/${Date.now()}`,
-    jsonOnly   = argv.j || argv.json_only;
-
-
-// Init
-
-start();
-
-
-// Functions
-
-function start() {
-
-  logBox(`BWCo Asset Downloader v${pkg.version}`, {
-    margin: {
-      top: 2
+  try {
+    for (const [index, source] of config.sources.entries()) {
+      const updated = await syncSource(source, index, { config, tempDir, options });
+      if (!updated) skipped.push(source);
     }
-  });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 
-  logSetup();
-
-  logBox(`Processing sources`);
-
-  let downloadQueue = [];
-
-  Promise.all(config.schemas.map((schema, schemaIndex) =>
-    Promise.all(schema.sources.map((source, sourceIndex) =>
-      fetch(source.url)
-        .then((result) => result.json())
-        .then((sourceData) => {
-
-          let sourceFolder       = source.targetFolder ? `/${source.targetFolder}` : ``;
-              downloadPath       = `${tempFolder}/${schemaIndex}${sourceFolder}`,
-              downloadPathAssets = `${downloadPath}/assets`,
-              inJsonPathAssets   = `${config.targetFolder}${sourceFolder}/assets`;
-
-          let assetObjs          = createAssetObjs(schema.assets, sourceData),
-              assetCount         = jsonOnly ? 0 : assetObjs.length;
-
-          logMsgSourceProcessed(schemaIndex, sourceIndex, source.url, assetCount);
-
-          return createDownloadObjs(assetObjs, downloadPathAssets, inJsonPathAssets)
-            .then((objs) => {
-
-              let sourceFolder       = source.targetFolder ? `/${source.targetFolder}` : ``;
-                  downloadPathJson   = `${tempFolder}/${schemaIndex}${sourceFolder}/${source.targetFilename}`;
-
-              if (!jsonOnly) {
-                downloadQueue = downloadQueue.concat(objs);
-              }
-
-              return fse.outputFile(downloadPathJson, stringifyJSON(sourceData));
-            })
-            .catch((error) => console.log(error));
-
-        })
-    ))
-  ))
-  .then(() => {
-    logMsgSourcesProcessed(downloadQueue.length);
-    startDownloadQueue(downloadQueue);
-  })
-  .catch((error) => console.log(error));
-
+  log.summary(config.sources.length, skipped, options);
+  return skipped.length > 0 ? 1 : 0;
 }
 
-function createAssetObjs(fieldPaths, data) {
+/**
+ * Brings down one source's JSON and every asset it references, and writes them into the
+ * project only once all of them have arrived intact. If any single thing fails, the source
+ * is left exactly as it was on disk: old data that works beats new data that doesn't.
+ */
+async function syncSource(source, index, { config, tempDir, options }) {
+  const staging = path.join(tempDir, String(index));
+  const dest = path.join(config.outDir, source.dir);
+  const hasAssets = !options.jsonOnly && source.assets.length > 0;
 
-  const objs = [];
+  log.source(index + 1, config.sources.length, source.url);
 
-  const addAssetObjs = (node, fields, filename) => {
+  // 1. Read the JSON. Without it there is nothing to do for this source.
+  let data;
+  try {
+    data = await fetchJson(source.url);
+  } catch (error) {
+    log.skipped([{ url: source.url, error }], dest);
+    return false;
+  }
 
-    let field      = fields[0],
-        fieldsLeft = fields.slice(1);
+  // 2. Find the assets the JSON references
+  const refs = collectAssetRefs(data, source.assets);
 
-    filename      += field;
+  for (const ref of refs) {
+    ref.tempDir = path.join(staging, 'assets');
+    ref.publicDir = [config.publicPath, source.dir, 'assets'].filter(Boolean).join('/');
+  }
 
-    if (fieldsLeft.length) {
-      if (node[field]) {
-        if (Array.isArray(node[field])) {
-          for (let i = 0; i < node[field].length; i++) {
-            addAssetObjs(node[field][i], fieldsLeft, `${filename}-${i + 1}-`);
-          }
-        } else {
-          addAssetObjs(node[field], fieldsLeft, `${filename}-`);
-        }
+  const jobs = groupByUrl(refs);
+  log.referenced(jobs.length);
+
+  if (options.dryRun) {
+    log.wouldWrite(jobs, { dest, file: source.file, hasAssets }, options);
+    return true;
+  }
+
+  // 3. Fetch every asset. One failure is enough to call the whole source off, but we let
+  //    the rest finish first, so a single run reports everything that is broken.
+  if (jobs.length > 0 && options.jsonOnly) {
+    await resolveAssets(jobs, options.concurrency);
+  } else if (jobs.length > 0) {
+    const { failures, bytes } = await downloadAssets(jobs, options.concurrency, log.progress);
+
+    if (failures.length > 0) {
+      log.skipped(failures, dest);
+      return false;
+    }
+
+    log.downloaded(jobs.length, bytes);
+  }
+
+  // 4. Everything arrived, so it is safe to update the project
+  await stage(staging, source, data, hasAssets);
+  await publish(staging, dest, source, hasAssets);
+  log.written(dest, source.file, hasAssets);
+
+  return true;
+}
+
+/** Writes the rewritten JSON into the temp folder, beside the assets it now points at. */
+async function stage(staging, source, data, hasAssets) {
+  if (hasAssets) await mkdir(path.join(staging, 'assets'), { recursive: true });
+
+  await mkdir(staging, { recursive: true });
+  await writeFile(path.join(staging, source.file), JSON.stringify(data, null, 2));
+}
+
+/** Moves a fully downloaded source into the project. */
+async function publish(staging, dest, source, hasAssets) {
+  await mkdir(dest, { recursive: true });
+
+  if (hasAssets) {
+    // Replace the assets folder wholesale; leave everything else in dest alone
+    await rm(path.join(dest, 'assets'), { recursive: true, force: true });
+    await cp(path.join(staging, 'assets'), path.join(dest, 'assets'), { recursive: true });
+  }
+
+  await copyFile(path.join(staging, source.file), path.join(dest, source.file));
+}
+
+// CLI
+
+const USAGE = `
+  Usage: download [options]
+
+  Downloads JSON data sources and the assets they reference, rewriting the
+  asset URLs in the JSON to point at the local copies.
+
+  A source is only written to the project if every one of its assets downloads
+  cleanly. If any fails, that source is left untouched and the run exits 1.
+
+  Options:
+    -c, --config <file>   Config file to read       (default: config.json)
+    -j, --json-only       Skip assets, JSON only
+    -n, --concurrency <n> Parallel downloads        (default: 8)
+        --dry-run         Report without writing
+    -h, --help            Show this message
+    -v, --version         Show version
+`;
+
+async function main() {
+  let args;
+
+  try {
+    ({ values: args } = parseArgs({
+      options: {
+        config: { type: 'string', short: 'c', default: 'config.json' },
+        'json-only': { type: 'boolean', short: 'j', default: false },
+        concurrency: { type: 'string', short: 'n', default: '8' },
+        'dry-run': { type: 'boolean', default: false },
+        help: { type: 'boolean', short: 'h', default: false },
+        version: { type: 'boolean', short: 'v', default: false }
       }
-    } else {
-      objs.push({ node, field, filename });
-    }
-
+    }));
+  } catch (error) {
+    throw new UserError(error.message);
   }
 
-  if (fieldPaths && fieldPaths.length) {
-    fieldPaths.forEach((fieldPath) => {
-      addAssetObjs(data, fieldPath.split('.'), '');
-    })
+  if (args.help) {
+    console.log(USAGE);
+    return 0;
   }
 
-  return objs;
-
-}
-
-function createDownloadObjs(assetObjs, folderDownload, folderInJson) {
-
-  let downloads = [];
-
-  const queueDownload = (from, to) => {
-    let queued = downloads.find((download) => (download.from === from));
-    if (!!queued) {
-      queued.to.push(to);
-    } else {
-      downloads.push({
-        from: from,
-        to: [ to ]
-      });
-    }
+  if (args.version) {
+    const pkg = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8'));
+    console.log(pkg.version);
+    return 0;
   }
 
-  return Promise.all(assetObjs.map((assetObj, objIndex) => {
-
-    let url = assetObj.node[assetObj.field];
-
-    if (!url) {
-      return Promise.resolve()
-    }
-
-    return rp({
-      uri: url,
-      method: 'HEAD',
-      resolveWithFullResponse: true
-    })
-    .then((response) => new Promise((resolve, reject) => {
-
-      let urlResolved  = response.request.uri.href,
-          filename     = `${assetObj.filename}.${getFileExtension(urlResolved)}`,
-          pathDownload = `${folderDownload}/${filename}`,
-          pathInJson   = `${folderInJson}/${filename}`;
-
-      // Update path on object reference itself (to pathInJson),
-      // for when the object is written to JSON locally
-      assetObj.node[assetObj.field] = pathInJson;
-
-      queueDownload(urlResolved, pathDownload);
-
-      resolve();
-
-    }))
-    .catch((error) => console.log(error));
-
-  }))
-  .then(() => new Promise((resolve, reject) => {
-    resolve(downloads);
-  }));
-
-}
-
-function startDownloadQueue(queue) {
-
-  logBox("Downloading assets");
-
-  let downloadIndex = 0;
-
-  const onAssetError = (error) => {
-    logMsg(`${error}`.red);
-    console.log(error);
-  }
-
-  const downloadNext = () => {
-
-    const download     = queue[downloadIndex],
-          outputPath   = `${__dirname}/${download.to[0]}`;
-
-    fse.ensureFileSync(outputPath);
-
-    const readStream   = request(download.from),
-          writeStream  = fs.createWriteStream(outputPath).on('error', onAssetError);
-
-    let fileSize       = 0;
-
-    const readProgress = progress(readStream, {
-      throttle: 100
-    })
-    .on('error', onAssetError)
-    .on('progress', (state) => {
-      fileSize = state.size.total;
-      logMsgProgress(downloadIndex, queue.length, fileSize, state.percent, state.speed)
-    })
-    .on('end', () => {
-
-      if (download.to.length > 1) {
-        copyAssetToPaths(download.to[0], download.to.slice(1));
-      }
-
-      logMsgProgress(downloadIndex, queue.length, fileSize, 1)
-
-      if (++downloadIndex < queue.length) {
-        downloadNext();
-      } else {
-        logMsg(`\n`);
-        logMsg(`  ${queue.length}`.cyan + ` assets downloaded`);
-        logMsg();
-
-        copyCompletedFiles();
-
-      }
-
-    })
-    .pipe(writeStream);
-
-  }
-
-  if (!queue.length) {
-    logMsg(`  No assets to download`);
-    logMsg();
-    copyCompletedFiles();
-
-  } else {
-    downloadNext();
-  }
-
-}
-
-function copyAssetToPaths(source, targets) {
-
-  targets.forEach((target) => {
-
-    let pathSrc  = `${__dirname}/${source}`,
-        pathTrgt = `${__dirname}/${target}`;
-
-    fse.ensureFileSync(pathTrgt);
-    fs.createReadStream(pathSrc).pipe(fs.createWriteStream(pathTrgt));
-
-  })
-
-}
-
-function copyCompletedFiles() {
-
-  logBox(`Copying files to project folder`)
-
-  config.schemas.forEach((schema, schemaIndex) => {
-
-    logMsg(`  Copying schema ${schemaIndex + 1} files`);
-
-    let schemaFromPath = `${__dirname}/${tempFolder}/${schemaIndex}`,
-        schemaToPath   = `${config.projectPath}/${config.targetFolder}`,
-        hasAssets      = !jsonOnly && !!schema.assets && !!schema.assets.length;
-
-    // ~ converts to home directory
-    if (schemaToPath.slice(0, 1) === '~') {
-      schemaToPath = `${os.homedir()}${schemaToPath.slice(1)}`;
-    }
-
-    // remove trailing slash
-    if (schemaToPath.slice(-1) === '/') {
-      schemaToPath = schemaToPath.slice(0, -1);
-    }
-
-    schema.sources.forEach((source, sourceIndex) => {
-
-      let sourceFolder    = source.targetFolder ? `/${source.targetFolder}` : ``,
-          sourceFromPath  = schemaFromPath + sourceFolder,
-          sourceToPath    = schemaToPath + sourceFolder;
-
-      if (hasAssets) {
-
-        let assetsFromPath = `${sourceFromPath}/assets`,
-            assetsToPath   = `${sourceToPath}/assets`;
-
-        logMsg(`    ${assetsToPath}`.gray);
-
-        rimraf.sync(assetsToPath + `/*`);
-        fse.copySync(assetsFromPath, assetsToPath)
-
-      }
-
-      logMsg(`    ${sourceToPath}/${source.targetFilename}`.gray);
-
-      fse.copySync(`${sourceFromPath}/${source.targetFilename}`, `${sourceToPath}/${source.targetFilename}`);
-
-    });
-
-    logMsg();
-
-  });
-
-  logMsg(`  Clearing temporary folder`);
-  logMsg();
-
-  if (CLEAR_TEMP_FOLDER_DELAY) {
-    setTimeout(clearTempFolder, CLEAR_TEMP_FOLDER_DELAY);
-  } else {
-    clearTempFolder();
-  }
-
-}
-
-function clearTempFolder() {
-
-  rimraf.sync(`${__dirname}/${tempFolder}`);
-
-  logBox(`All assets ready! Great job`)
-
-}
-
-
-// Output
-
-function logSetup() {
-
-  if (jsonOnly) {
-    logMsg(`  WARNING: `.red + `JSON only mode enabled (skipping asset download)\n`);
-  }
-
-  logMsg(`  Config: ${configFile}`);
-
-  config.schemas.forEach((schema, i) => {
-    logMsg(`\n  Schema ${i + 1}`);
-    schema.sources.forEach((source, j) => {
-      logMsg(`    ${source.url}`.gray);
-    })
-  });
-  logMsg();
-
-}
-function logMsgSourceProcessed(schemaIndex, sourceIndex, sourceUrl, count) {
-  logMsg(`  Schema ${schemaIndex + 1}, source ${sourceIndex + 1} processed`)
-  logMsg(`    ${sourceUrl}`.gray);
-  if (count > 0) {
-    logMsg(`    ${count}`.cyan + ` downloads queued`.gray);
-  } else {
-    logMsg(`    No assets to download`.gray);
-  }
-  logMsg();
-}
-function logMsgSourcesProcessed(count) {
-  logMsg(`  All sources processed`);
-  logMsg(`    ${count}`.cyan + ` downloads queued`.gray)
-  logMsg();
-}
-function logMsgProgress(index, count, size, perc, speed = 0) {
-
-  const percTotal = (index + 1) / count,
-        prefix    = `${rightAlignNum(index + 1, count)}/${count}`,
-        suffix    = `${formatFileSize(size)}` + ((speed > 0) ? ` (${formatFileSize(speed)}/s)` : ``)
-
-  const lenFile  = Math.ceil(DL_BAR_LENGTH * perc),
-        lenTotal = Math.ceil(DL_BAR_LENGTH * percTotal);
-
-  const lenFT    = Math.min(lenFile, lenTotal),
-        lenF     = lenFile  - lenFT,
-        lenT     = lenTotal - lenFT,
-        lenEmpty = DL_BAR_LENGTH - (lenFT + lenF + lenT);
-
-  const barFT    = (lenFT    > 0) ? `\u2588`.repeat(lenFT).cyan : ``,
-        barF     = (lenF     > 0) ? `\u2580`.repeat(lenF).white : ``,
-        barT     = (lenT     > 0) ? `\u2584`.repeat(lenT).cyan : ``,
-        barEmpty = (lenEmpty > 0) ? `\u2501`.repeat(lenEmpty).gray : ``,
-        bar      = barFT + barF + barT + barEmpty;
-
-  readline.clearLine(process.stdout);
-  readline.cursorTo(process.stdout, 0);
-
-  process.stdout.write(`  ${prefix}`.gray + ` ${bar} ${suffix} `);
-
-}
-
-
-// Helpers
-
-function logMsg(msg, partialLine) {
-  if (partialLine) {
-    process.stdout.write(msg || ``);
-  } else {
-    console.log(msg || ``);
-  }
-
-}
-
-function getFileExtension(file) {
-  return file.split('.').pop().split('?').shift();
-}
-function formatFileSize(bytes) {
-
-  const KB = 1024,
-        MB = 1024 * 1024;
-
-  if (bytes < MB) {
-    return `${Math.ceil(bytes / KB)} KB`;
-  } else {
-    return `${Math.ceil(bytes / MB)} MB`;
-  }
-
-}
-
-function rightAlignNum(num, maxNum) {
-
-  const curLen = num.toString().length,
-        maxLen = maxNum.toString().length;
-
-  return ` `.repeat(maxLen - curLen) + num;
-
-}
-
-function stringifyJSON(json, emitUnicode) {
-  var result = JSON.stringify(json);
-  return emitUnicode ? result : result.replace(/[\u007f-\uffff]/g,
-    function(c) {
-      return '\\u'+('0000'+c.charCodeAt(0).toString(16)).slice(-4);
-    }
+  const concurrency = Number(args.concurrency);
+  check(
+    Number.isInteger(concurrency) && concurrency > 0,
+    `--concurrency must be a positive integer, got: ${args.concurrency}`
   );
+
+  return run({
+    config: args.config,
+    jsonOnly: args['json-only'],
+    dryRun: args['dry-run'],
+    concurrency
+  });
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  try {
+    process.exitCode = await main();
+  } catch (error) {
+    log.fatal(error, { verbose: !(error instanceof UserError) });
+    process.exitCode = 1;
+  }
 }

@@ -1,36 +1,24 @@
 {
-  "projectPath": "~/Desktop/Asset Downloader example",
-  "targetFolder": "assets",
-  "schemas": [
+  "outDir": "~/Desktop/Asset Downloader example/assets",
+  "publicPath": "assets",
+  "sources": [
     {
-      "sources": [
-        {
-          "url": "https://dog.ceo/api/breed/bulldog/french/images/random",
-          "targetFolder": "French Bulldogs",
-          "targetFilename": "data.json"
-        },
-        {
-          "url": "https://dog.ceo/api/breed/pug/images/random",
-          "targetFolder": "Pugs",
-          "targetFilename": "data.json"
-        }
-      ],
-      "assets": [
-        "message"
-      ]
+      "url": "https://dog.ceo/api/breed/bulldog/french/images/random",
+      "dir": "French Bulldogs",
+      "file": "data.json",
+      "assets": ["message"]
     },
     {
-      "sources": [
-        {
-          "url": "https://api.nasa.gov/planetary/apod?api_key=DEMO_KEY",
-          "targetFolder": "NASA APOD",
-          "targetFilename": "data.json"
-        }
-      ],
-      "assets": [
-        "hdurl",
-        "url"
-      ]
+      "url": "https://dog.ceo/api/breed/pug/images/random",
+      "dir": "Pugs",
+      "file": "data.json",
+      "assets": ["message"]
+    },
+    {
+      "url": "https://api.nasa.gov/planetary/apod?api_key=DEMO_KEY",
+      "dir": "NASA APOD",
+      "file": "data.json",
+      "assets": ["hdurl", "url"]
     }
   ]
 }
