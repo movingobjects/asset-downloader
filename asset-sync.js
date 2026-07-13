@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
-import { collectAssetRefs, groupByUrl } from './lib/assets.js';
+import { collectAssetRefs, groupByUrl, joinPath } from './lib/assets.js';
 import { loadConfig } from './lib/config.js';
 import { check, UserError } from './lib/error.js';
 import * as log from './lib/log.js';
@@ -59,7 +59,7 @@ async function syncSource(source, index, { config, tempDir, options }) {
 
   for (const ref of refs) {
     ref.tempDir = path.join(staging, 'assets');
-    ref.publicDir = [config.publicPath, source.dir, 'assets'].filter(Boolean).join('/');
+    ref.pathDir = joinPath(config.pathPrefix, source.dir, 'assets');
   }
 
   const jobs = groupByUrl(refs);
@@ -139,7 +139,7 @@ const USAGE = `
 
 const TEMPLATE = `{
   "outDir": "./public/assets",
-  "publicPath": "assets",
+  "pathPrefix": "/assets",
   "sources": [
     {
       "url": "https://example.com/api/content",

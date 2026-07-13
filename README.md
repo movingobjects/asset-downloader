@@ -19,7 +19,7 @@ Requires Node 22 or newer. It has no dependencies of its own.
 Install it as a dev dependency, pinned to a version tag:
 
 ```bash
-npm install --save-dev github:movingobjects/asset-sync#v1.0.0
+npm install --save-dev github:belle-wissell/asset-sync#v1.0.0
 ```
 
 Pinning to a tag matters: the version is recorded in the project's `package-lock.json`, so every machine that runs `npm ci` — every kiosk — gets the exact tool that project was tested against.
@@ -66,7 +66,7 @@ Everything is downloaded to a temporary folder first, and only copied into the p
 ```json
 {
   "outDir": "~/Projects/my-site/public/assets",
-  "publicPath": "assets",
+  "pathPrefix": "/assets",
   "sources": [
     {
       "url": "https://example.com/api/stories",
@@ -78,6 +78,20 @@ Everything is downloaded to a temporary folder first, and only copied into the p
 }
 ```
 
+### Where things land
+
+Asset Sync writes a file to disk, then writes a path to that file into the JSON. Those are two different paths for the same thing, and each is built from a different field:
+
+```text
+outDir      ~/Projects/my-site/public/assets  ─┐
+                                               ├─ on disk:  ~/Projects/my-site/public/assets/Stories/assets/stories-1-img.jpg
+dir         Stories                           ─┤
+                                               ├─ in JSON:  /assets/Stories/assets/stories-1-img.jpg
+pathPrefix  /assets                           ─┘
+```
+
+`outDir` never appears in the JSON, and `pathPrefix` never appears on disk. `dir` appears in both. So changing `outDir` moves the files without touching the JSON, and changing `pathPrefix` rewrites the JSON without moving a single file.
+
 ### `outDir`
 
 Where downloaded files are written on disk. May start with `~` for your home directory.
@@ -86,22 +100,35 @@ Within it, each source gets a folder containing its JSON file and an `assets` fo
 
 > **Note:** a source's `assets` folder is **replaced** on every run. Anything else in `outDir` is left alone.
 
-### `publicPath`
+### `pathPrefix`
 
-The prefix used when rewriting asset URLs inside the JSON — that is, how your app refers to the assets at runtime, which is usually not the same as where they sit on disk.
+What gets put in front of the asset paths written into the JSON — that is, how your app reaches an asset at runtime, which is usually not where it sits on disk.
 
-With the config above, an asset lands on disk at `~/Projects/my-site/public/assets/Stories/assets/stories-1-img.jpg`, and its URL in the JSON becomes `assets/Stories/assets/stories-1-img.jpg`.
+Whether you lead with a `/` matters and is preserved:
 
-Leave it out to make the rewritten paths relative to `outDir` itself.
+- `"/assets"` → `/assets/Stories/assets/stories-1-img.jpg`, resolved against the site root. Use this if your app has routes.
+- `"assets"` → `assets/Stories/assets/stories-1-img.jpg`, resolved against whatever page is asking.
+
+Leave it out to get paths relative to `outDir` itself (`Stories/assets/stories-1-img.jpg`) — the right choice when something loads the files straight off disk rather than serving them.
 
 ### `sources`
 
 One entry per JSON endpoint.
 
 - `url` — full URL of the JSON endpoint
-- `dir` — (optional) subfolder of `outDir` for this source's data and assets
+- `dir` — (optional) subfolder for this source, appearing in **both** the disk path and the rewritten JSON path
 - `file` — (optional) filename for the downloaded JSON (default: `data.json`)
 - `assets` — (optional) field paths to the asset URLs in the JSON. If omitted, only the JSON is downloaded.
+
+`dir` is what keeps sources from overwriting each other, so two sources that would download assets into the same folder are rejected before anything is written.
+
+Given a source that returns `{ "stories": [{ "img": "https://cdn.example.com/x7f2.jpg" }] }` and the config above, setting `"dir": "Stories"` writes the file to `<outDir>/Stories/assets/stories-1-img.jpg` and rewrites the JSON to:
+
+```json
+{ "stories": [{ "img": "/assets/Stories/assets/stories-1-img.jpg" }] }
+```
+
+Change `dir` to `"Fall 2026"` and both move in step — the file lands in `<outDir>/Fall 2026/assets/`, and the JSON reads `/assets/Fall 2026/assets/stories-1-img.jpg`.
 
 ### `assets` field paths
 
@@ -151,7 +178,7 @@ File extensions come from the asset's final URL after redirects, falling back to
 ## Development
 
 ```bash
-git clone https://github.com/movingobjects/asset-sync
+git clone https://github.com/belle-wissell/asset-sync
 cd asset-sync
 node --test
 node asset-sync.js --config asset-sync.config.example.json
