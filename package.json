@@ -1,6 +1,6 @@
 {
   "name": "asset-downloader",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Downloads JSON data sources and the assets they reference",
   "type": "module",
   "main": "download.js",
