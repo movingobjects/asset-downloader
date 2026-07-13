@@ -12,32 +12,41 @@ The downloader:
 
 A source is only written into your project if every one of its assets downloaded intact — see [All or nothing](#all-or-nothing-per-source).
 
-## Requirements
+Requires Node 22 or newer. It has no dependencies of its own.
 
-Node 22 or newer. There are no dependencies to install.
+## Adding it to a project
 
-## Quick start
-
-```bash
-git clone https://github.com/movingobjects/asset-downloader
-cd asset-downloader
-node download.js --config config.example.json
-```
-
-## Usage
-
-1. Describe your data sources in `config.json` (see [Configuration](#configuration))
-2. Run the downloader:
+Install it as a dev dependency, pinned to a version tag:
 
 ```bash
-node download.js
+npm install --save-dev github:movingobjects/asset-downloader#v1.0.0
 ```
+
+Pinning to a tag matters: the version is recorded in the project's `package-lock.json`, so every machine that runs `npm ci` — every kiosk — gets the exact tool that project was tested against.
+
+Then scaffold a config and add a script:
+
+```bash
+npx asset-sync --init
+npm pkg set scripts.sync=asset-sync
+```
+
+Point the config at your data sources (see [Configuration](#configuration)), and sync whenever you need fresh content:
+
+```bash
+npm run sync
+```
+
+Paths in the config are resolved from the project directory, so `"outDir": "./public/assets"` puts the files where the app expects them.
+
+## Options
 
 ```text
   -c, --config <file>    Config file to read       (default: config.json)
   -j, --json-only        Skip assets, JSON only
   -n, --concurrency <n>  Parallel downloads        (default: 8)
       --dry-run          Report without writing
+      --init             Write a starter config.json here
   -h, --help             Show this message
   -v, --version          Show version
 ```
@@ -142,13 +151,27 @@ File extensions come from the asset's final URL after redirects, falling back to
 ## Development
 
 ```bash
+git clone https://github.com/movingobjects/asset-downloader
+cd asset-downloader
 node --test
+node download.js --config config.example.json
 ```
 
 | File | Contains |
 | --- | --- |
-| [`download.js`](download.js) | CLI, and the four stages of a run |
+| [`download.js`](download.js) | CLI, and the stages of syncing one source |
 | [`lib/assets.js`](lib/assets.js) | Finding asset URLs in JSON, naming them, rewriting them |
 | [`lib/config.js`](lib/config.js) | Reading and validating the config file |
 | [`lib/net.js`](lib/net.js) | Fetching, retries, and the download pool |
 | [`lib/log.js`](lib/log.js) | Everything printed to the terminal |
+
+### Releasing
+
+Projects install this by git tag, so a release is a tag:
+
+```bash
+npm version minor        # bumps package.json and commits a v-tag
+git push --follow-tags
+```
+
+Projects pick up the new version when they choose to, by bumping the tag in their `package.json`. Nothing updates a kiosk behind your back.

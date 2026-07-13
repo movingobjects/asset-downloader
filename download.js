@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { realpathSync } from 'node:fs';
 import { copyFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -116,7 +117,7 @@ async function publish(staging, dest, source, hasAssets) {
 // CLI
 
 const USAGE = `
-  Usage: download [options]
+  Usage: asset-sync [options]
 
   Downloads JSON data sources and the assets they reference, rewriting the
   asset URLs in the JSON to point at the local copies.
@@ -129,9 +130,39 @@ const USAGE = `
     -j, --json-only       Skip assets, JSON only
     -n, --concurrency <n> Parallel downloads        (default: 8)
         --dry-run         Report without writing
+        --init            Write a starter config.json here
     -h, --help            Show this message
     -v, --version         Show version
 `;
+
+const TEMPLATE = `{
+  "outDir": "./public/assets",
+  "publicPath": "assets",
+  "sources": [
+    {
+      "url": "https://example.com/api/content",
+      "dir": "Content",
+      "file": "data.json",
+      "assets": ["stories.img"]
+    }
+  ]
+}
+`;
+
+/** Writes a starter config into the current project, without ever clobbering one. */
+async function init() {
+  const file = path.resolve('config.json');
+
+  try {
+    await writeFile(file, TEMPLATE, { flag: 'wx' });
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+    throw new UserError(`There is already a config file here: ${file}`);
+  }
+
+  log.created(file);
+  return 0;
+}
 
 async function main() {
   let args;
@@ -143,6 +174,7 @@ async function main() {
         'json-only': { type: 'boolean', short: 'j', default: false },
         concurrency: { type: 'string', short: 'n', default: '8' },
         'dry-run': { type: 'boolean', default: false },
+        init: { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h', default: false },
         version: { type: 'boolean', short: 'v', default: false }
       }
@@ -155,6 +187,8 @@ async function main() {
     console.log(USAGE);
     return 0;
   }
+
+  if (args.init) return init();
 
   if (args.version) {
     const pkg = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8'));
@@ -176,7 +210,11 @@ async function main() {
   });
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+// Run only when invoked directly, not when imported. argv[1] is resolved because npm installs
+// this bin as a symlink, and the symlink path would never match this module's real path.
+const invokedDirectly = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (invokedDirectly) {
   try {
     process.exitCode = await main();
   } catch (error) {
