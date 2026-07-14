@@ -25,6 +25,16 @@ describe('collectAssetRefs', () => {
     );
   });
 
+  test('walks a JSON document that is itself an array', () => {
+    const data = [{ imagePath: 'http://example.com/1.jpg' }, { imagePath: 'http://example.com/2.jpg' }];
+    const refs = collectAssetRefs(data, ['imagePath']); // no field name sits above the list
+
+    assert.deepEqual(
+      refs.map((r) => r.name),
+      ['1-imagePath', '2-imagePath']
+    );
+  });
+
   test('finds URLs in an array of strings at the leaf', () => {
     const data = { otherImgs: ['http://example.com/a.jpg', 'http://example.com/b.jpg'] };
     const refs = collectAssetRefs(data, ['otherImgs']);

@@ -154,6 +154,30 @@ assets/otherImgs-2.jpg
 
 File extensions come from the asset's final URL after redirects, falling back to its content type. Missing fields are skipped, and a URL referenced more than once is downloaded only once.
 
+### When the endpoint returns an array
+
+Arrays are stepped through automatically, so you never name them in a field path — you name the fields *inside* them. That holds for the whole document too. If the endpoint returns a bare array:
+
+```json
+[
+  { "imagePath": "http://example.com/image.jpg" },
+  { "imagePath": "http://example.com/other.jpg" }
+]
+```
+
+the field path is just `"imagePath"`, with nothing in front of it:
+
+```json
+"assetFields": ["imagePath"]
+```
+
+Items are numbered from 1, exactly as they are anywhere else:
+
+```text
+assets/1-imagePath.jpg
+assets/2-imagePath.jpg
+```
+
 ## Options
 
 ```text
