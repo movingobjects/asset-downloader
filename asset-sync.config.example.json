@@ -1,24 +1,28 @@
 {
-  "outDir": "~/Desktop/Asset Sync example/assets",
-  "publicPath": "assets",
   "sources": [
     {
       "url": "https://dog.ceo/api/breed/bulldog/french/images/random",
-      "dir": "French Bulldogs",
-      "file": "data.json",
-      "assets": ["message"]
+      "outputDir": "~/Desktop/Asset Sync example/French Bulldogs",
+      "assetFields": [
+        "message"
+      ]
     },
     {
       "url": "https://dog.ceo/api/breed/pug/images/random",
-      "dir": "Pugs",
-      "file": "data.json",
-      "assets": ["message"]
+      "outputDir": "~/Desktop/Asset Sync example/Pugs",
+      "assetFields": [
+        "message"
+      ]
     },
     {
       "url": "https://api.nasa.gov/planetary/apod?api_key=DEMO_KEY",
-      "dir": "NASA APOD",
-      "file": "data.json",
-      "assets": ["hdurl", "url"]
+      "outputDir": "~/Desktop/Asset Sync example/NASA APOD",
+      "dataFile": "apod.json",
+      "assetFolder": "images",
+      "assetFields": [
+        "hdurl",
+        "url"
+      ]
     }
   ]
 }

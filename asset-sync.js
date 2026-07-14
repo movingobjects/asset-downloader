@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
-import { collectAssetRefs, groupByUrl, joinPath } from './lib/assets.js';
+import { collectAssetRefs, groupByUrl } from './lib/assets.js';
 import { loadConfig } from './lib/config.js';
 import { check, UserError } from './lib/error.js';
 import * as log from './lib/log.js';
@@ -40,8 +40,7 @@ async function run(options) {
  */
 async function syncSource(source, index, { config, tempDir, options }) {
   const staging = path.join(tempDir, String(index));
-  const dest = path.join(config.outDir, source.dir);
-  const hasAssets = !options.jsonOnly && source.assets.length > 0;
+  const hasAssets = !options.jsonOnly && source.assetFields.length > 0;
 
   log.source(index + 1, config.sources.length, source.url);
 
@@ -50,23 +49,23 @@ async function syncSource(source, index, { config, tempDir, options }) {
   try {
     data = await fetchJson(source.url);
   } catch (error) {
-    log.skipped([{ url: source.url, error }], dest);
+    log.skipped([{ url: source.url, error }], source);
     return false;
   }
 
   // 2. Find the assets the JSON references
-  const refs = collectAssetRefs(data, source.assets);
+  const refs = collectAssetRefs(data, source.assetFields);
 
   for (const ref of refs) {
     ref.tempDir = path.join(staging, 'assets');
-    ref.pathDir = joinPath(config.pathPrefix, source.dir, 'assets');
+    ref.pathDir = source.assetFolder; // relative to outputDir, and so to the JSON file landing there
   }
 
   const jobs = groupByUrl(refs);
   log.referenced(jobs.length);
 
   if (options.dryRun) {
-    log.wouldWrite(jobs, { dest, file: source.file, hasAssets }, options);
+    log.wouldWrite(jobs, source, hasAssets, options);
     return true;
   }
 
@@ -78,7 +77,7 @@ async function syncSource(source, index, { config, tempDir, options }) {
     const { failures, bytes } = await downloadAssets(jobs, options.concurrency, log.progress);
 
     if (failures.length > 0) {
-      log.skipped(failures, dest);
+      log.skipped(failures, source);
       return false;
     }
 
@@ -87,31 +86,31 @@ async function syncSource(source, index, { config, tempDir, options }) {
 
   // 4. Everything arrived, so it is safe to update the project
   await stage(staging, source, data, hasAssets);
-  await publish(staging, dest, source, hasAssets);
-  log.written(dest, source.file, hasAssets);
+  await publish(staging, source, hasAssets);
+  log.written(source, hasAssets);
 
   return true;
 }
 
 /** Writes the rewritten JSON into the temp folder, beside the assets it now points at. */
 async function stage(staging, source, data, hasAssets) {
+  await mkdir(staging, { recursive: true });
   if (hasAssets) await mkdir(path.join(staging, 'assets'), { recursive: true });
 
-  await mkdir(staging, { recursive: true });
-  await writeFile(path.join(staging, source.file), JSON.stringify(data, null, 2));
+  await writeFile(path.join(staging, source.dataFile), JSON.stringify(data, null, 2));
 }
 
 /** Moves a fully downloaded source into the project. */
-async function publish(staging, dest, source, hasAssets) {
-  await mkdir(dest, { recursive: true });
+async function publish(staging, source, hasAssets) {
+  await mkdir(source.outputDir, { recursive: true });
 
   if (hasAssets) {
-    // Replace the assets folder wholesale; leave everything else in dest alone
-    await rm(path.join(dest, 'assets'), { recursive: true, force: true });
-    await cp(path.join(staging, 'assets'), path.join(dest, 'assets'), { recursive: true });
+    // Replace the asset folder wholesale; leave everything else in outputDir alone
+    await rm(source.assetPath, { recursive: true, force: true });
+    await cp(path.join(staging, 'assets'), source.assetPath, { recursive: true });
   }
 
-  await copyFile(path.join(staging, source.file), path.join(dest, source.file));
+  await copyFile(path.join(staging, source.dataFile), source.dataPath);
 }
 
 // CLI
@@ -127,43 +126,44 @@ const USAGE = `
   A source is only written to the project if every one of its assets downloads
   cleanly. If any fails, that source is left untouched and the run exits 1.
 
+  The first run in a project writes a starter ${CONFIG_FILE}
+  and stops, so you can point it at your data sources.
+
   Options:
     -c, --config <file>   Config file to read       (default: ${CONFIG_FILE})
     -j, --json-only       Skip assets, JSON only
     -n, --concurrency <n> Parallel downloads        (default: 8)
         --dry-run         Report without writing
-        --init            Write a starter ${CONFIG_FILE} here
     -h, --help            Show this message
     -v, --version         Show version
 `;
 
 const TEMPLATE = `{
-  "outDir": "./public/assets",
-  "pathPrefix": "/assets",
   "sources": [
     {
       "url": "https://example.com/api/content",
-      "dir": "Content",
-      "file": "data.json",
-      "assets": ["stories.img"]
+      "outputDir": "./public/content",
+      "assetFields": ["stories.img"]
     }
   ]
 }
 `;
 
-/** Writes a starter config into the current project, without ever clobbering one. */
-async function init() {
-  const file = path.resolve(CONFIG_FILE);
-
+/**
+ * The first run in a project has nothing to sync, so it leaves behind a config to fill in. Writing
+ * exclusively is what makes that safe to attempt on every run: an existing config is never opened
+ * for writing at all, so it cannot be clobbered by a race, a crash, or a full disk.
+ */
+async function scaffoldConfig(file) {
   try {
     await writeFile(file, TEMPLATE, { flag: 'wx' });
   } catch (error) {
-    if (error.code !== 'EEXIST') throw error;
-    throw new UserError(`There is already a config file here: ${file}`);
+    if (error.code === 'EEXIST') return false; // already configured — get on with the sync
+    throw error;
   }
 
   log.created(file);
-  return 0;
+  return true;
 }
 
 async function main() {
@@ -176,7 +176,6 @@ async function main() {
         'json-only': { type: 'boolean', short: 'j', default: false },
         concurrency: { type: 'string', short: 'n', default: '8' },
         'dry-run': { type: 'boolean', default: false },
-        init: { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h', default: false },
         version: { type: 'boolean', short: 'v', default: false }
       }
@@ -190,8 +189,6 @@ async function main() {
     return 0;
   }
 
-  if (args.init) return init();
-
   if (args.version) {
     const pkg = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8'));
     console.log(pkg.version);
@@ -203,6 +200,11 @@ async function main() {
     Number.isInteger(concurrency) && concurrency > 0,
     `--concurrency must be a positive integer, got: ${args.concurrency}`
   );
+
+  // Only the default config is scaffolded. A --config that names a missing file is a typo, and
+  // deserves to be reported as one rather than answered with a starter config the user didn't ask for.
+  const usingDefaultConfig = args.config === CONFIG_FILE;
+  if (usingDefaultConfig && (await scaffoldConfig(path.resolve(CONFIG_FILE)))) return 0;
 
   return run({
     config: args.config,

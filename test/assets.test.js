@@ -94,25 +94,15 @@ describe('targetsFor', () => {
 });
 
 describe('localize', () => {
-  test('points every ref at its local copy', () => {
+  test('points every ref at its local copy, relative to the JSON file', () => {
     const data = { stories: [{ img: 'http://example.com/1.jpg' }], hero: 'http://example.com/1.jpg' };
     const [job] = groupByUrl(collectAssetRefs(data, ['stories.img', 'hero']));
 
-    for (const ref of job.refs) ref.pathDir = 'assets/Stories/assets';
+    for (const ref of job.refs) ref.pathDir = 'assets';
     localize(targetsFor(job, 'jpg'));
 
-    assert.equal(data.stories[0].img, 'assets/Stories/assets/stories-1-img.jpg');
-    assert.equal(data.hero, 'assets/Stories/assets/hero.jpg');
-  });
-
-  test('keeps a rooted path rooted', () => {
-    const data = { hero: 'http://example.com/1.jpg' };
-    const [job] = groupByUrl(collectAssetRefs(data, ['hero']));
-
-    for (const ref of job.refs) ref.pathDir = '/assets/Stories/assets';
-    localize(targetsFor(job, 'jpg'));
-
-    assert.equal(data.hero, '/assets/Stories/assets/hero.jpg');
+    assert.equal(data.stories[0].img, 'assets/stories-1-img.jpg');
+    assert.equal(data.hero, 'assets/hero.jpg');
   });
 
   test('a download that is never localized keeps its remote URL', () => {
@@ -126,18 +116,9 @@ describe('localize', () => {
 });
 
 describe('joinPath', () => {
-  test('drops empty segments', () => {
-    assert.equal(joinPath('', 'Stories', 'assets'), 'Stories/assets');
-    assert.equal(joinPath('assets', '', 'assets'), 'assets/assets');
-  });
-
-  test('preserves a leading slash, and never doubles it', () => {
-    assert.equal(joinPath('/assets', 'Stories', 'assets'), '/assets/Stories/assets');
-    assert.equal(joinPath('/', 'Stories', 'assets'), '/Stories/assets');
-  });
-
-  test('leaves a relative prefix relative', () => {
-    assert.equal(joinPath('assets', 'Stories', 'assets'), 'assets/Stories/assets');
+  test('joins with / and drops empty segments', () => {
+    assert.equal(joinPath('assets', 'hero.jpg'), 'assets/hero.jpg');
+    assert.equal(joinPath('', 'hero.jpg'), 'hero.jpg');
   });
 });
 
