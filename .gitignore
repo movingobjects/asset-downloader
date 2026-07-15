@@ -4,5 +4,12 @@ node_modules/
 # OS
 .DS_Store
 
-# Local config
+# Compiled binaries, and the scratch files bun leaves behind while making them
+dist/
+*.bun-build
+
+# Local config, and what a run leaves beside it — named after whichever config it ran
 asset-sync.config.json
+*.log
+*.log.1
+*.lock

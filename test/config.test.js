@@ -3,10 +3,10 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import test, { describe } from 'node:test';
 
-import { normalizeConfig } from '../lib/config.js';
+import { normalizeConfig, pathsFor } from '../lib/config.js';
 
-const source = (props) => ({ url: 'http://example.com/data.json', outputDir: '/out', ...props });
-const config = (...sources) => ({ sources: sources.map(source) });
+const source = (props) => ({ url: 'http://example.com/data.json', outputFolder: 'stories', ...props });
+const config = (...sources) => ({ baseOutputDir: '/out', sources: sources.map(source) });
 
 describe('normalizeConfig', () => {
   test('applies defaults', () => {
@@ -17,53 +17,55 @@ describe('normalizeConfig', () => {
     assert.deepEqual(s.assetFields, []);
   });
 
-  test('resolves the two paths a source writes to', () => {
-    const [s] = normalizeConfig(config({ outputDir: '/out/Pugs', dataFile: 'pugs.json', assetFolder: 'images' })).sources;
+  test('resolves baseOutputDir, and leaves each source a folder inside it', () => {
+    const { baseOutputDir, sources } = normalizeConfig(config({ outputFolder: 'pugs' }));
 
-    assert.equal(s.dataPath, '/out/Pugs/pugs.json');
-    assert.equal(s.assetPath, '/out/Pugs/images');
+    assert.equal(baseOutputDir, path.resolve('/out'));
+    assert.equal(sources[0].outputFolder, 'pugs');
   });
 
-  test('expands ~ to the home directory', () => {
-    const [s] = normalizeConfig(config({ outputDir: '~/out' })).sources;
+  test('expands ~ in baseOutputDir', () => {
+    const { baseOutputDir } = normalizeConfig({ ...config({}), baseOutputDir: '~/kiosk' });
 
-    assert.equal(s.dataPath, path.join(homedir(), 'out', 'data.json'));
+    assert.equal(baseOutputDir, path.join(homedir(), 'kiosk'));
   });
 
-  describe('colliding sources', () => {
-    test('rejects two sources writing the same JSON file', () => {
-      assert.throws(() => normalizeConfig(config({}, {})), /Two sources both write/);
-    });
+  // A scheduler starts the job in a directory of its own choosing — launchd uses `/` — so a
+  // relative path can only mean one thing: relative to the config file it was written in.
+  test('measures a relative baseOutputDir from the config file, not the working directory', () => {
+    const { baseOutputDir } = normalizeConfig({ ...config({}), baseOutputDir: './content' }, '/opt/kiosk');
 
-    test('rejects two sources downloading assets into the same folder', () => {
-      const input = config({ dataFile: 'a.json', assetFields: ['img'] }, { dataFile: 'b.json', assetFields: ['img'] });
-
-      assert.throws(() => normalizeConfig(input), /both download assets into/);
-    });
-
-    test('allows two sources to share an outputDir when only one has assets', () => {
-      const input = config({ dataFile: 'a.json', assetFields: ['img'] }, { dataFile: 'b.json' });
-
-      assert.equal(normalizeConfig(input).sources.length, 2);
-    });
+    assert.equal(baseOutputDir, path.resolve('/opt/kiosk/content'));
   });
 
-  // An asset folder is emptied and rewritten on every run. Its own source's JSON is a sibling, so
-  // it is never at risk — but another source parked inside the folder would be deleted with it.
-  test('rejects an assetFolder holding another source\'s outputDir', () => {
-    const input = config(
-      { outputDir: '/out', assetFields: ['img'] },
-      { outputDir: '/out/assets/Pugs' }
+  test('leaves an absolute baseOutputDir alone', () => {
+    const { baseOutputDir } = normalizeConfig({ ...config({}), baseOutputDir: '/srv/content' }, '/opt/kiosk');
+
+    assert.equal(baseOutputDir, path.resolve('/srv/content'));
+  });
+
+  test('rejects two sources sharing a folder', () => {
+    assert.throws(() => normalizeConfig(config({ outputFolder: 'a' }, { outputFolder: 'a' })), /own folder/);
+  });
+
+  test('allows sources with different folders', () => {
+    assert.equal(normalizeConfig(config({ outputFolder: 'a' }, { outputFolder: 'b' })).sources.length, 2);
+  });
+
+  // Asset Sync keeps the manifest in there, and it is not a source's to overwrite.
+  test('rejects a source claiming the asset-sync folder', () => {
+    assert.throws(
+      () => normalizeConfig(config({ outputFolder: 'asset-sync' })),
+      /Asset Sync keeps its manifest/
     );
-
-    assert.throws(() => normalizeConfig(input), /sits inside it/);
   });
 
   for (const [label, input, message] of [
-    ['an empty sources array', { sources: [] }, /sources/],
-    ['a source with no url', { sources: [{ outputDir: '/out' }] }, /url/],
-    ['a source with a bad url', { sources: [{ url: 'nope', outputDir: '/out' }] }, /valid URL/],
-    ['a source with no outputDir', { sources: [{ url: 'http://e.com' }] }, /outputDir/],
+    ['an empty sources array', { baseOutputDir: '/out', sources: [] }, /sources/],
+    ['a config with no baseOutputDir', { sources: [source({})] }, /baseOutputDir/],
+    ['a source with no url', { baseOutputDir: '/out', sources: [{ outputFolder: 'a' }] }, /url/],
+    ['a source with a bad url', { baseOutputDir: '/out', sources: [{ url: 'nope', outputFolder: 'a' }] }, /valid URL/],
+    ['a source with no outputFolder', { baseOutputDir: '/out', sources: [{ url: 'http://e.com' }] }, /"outputFolder"/],
     ['a dataFile with a path in it', config({ dataFile: 'nested/data.json' }), /dataFile/],
     ['an empty dataFile', config({ dataFile: '' }), /dataFile/],
     ['assetFields that are not strings', config({ assetFields: [{}] }), /assetFields/]
@@ -73,10 +75,25 @@ describe('normalizeConfig', () => {
     });
   }
 
-  // assetFolder names a folder inside outputDir, and nothing else — no separators, no climbing out
-  for (const assetFolder of ['../../public/assets', '..', '.', 'nested/assets', 'nested\\assets', '/var/assets', '']) {
-    test(`rejects an assetFolder of ${JSON.stringify(assetFolder)}`, () => {
-      assert.throws(() => normalizeConfig(config({ assetFolder })), /assetFolder must be a folder name/);
-    });
+  // Every name is a folder or file inside its parent, and nothing else — no separators, no climbing out
+  for (const key of ['outputFolder', 'assetFolder']) {
+    for (const name of ['../../public', '..', '.', 'nested/assets', 'nested\\assets', '/var/assets', '']) {
+      test(`rejects a ${key} of ${JSON.stringify(name)}`, () => {
+        assert.throws(() => normalizeConfig(config({ [key]: name })), new RegExp(key));
+      });
+    }
   }
+});
+
+describe('pathsFor', () => {
+  test('places a source under whichever root it is given', () => {
+    const input = config({ outputFolder: 'pugs', dataFile: 'pugs.json', assetFolder: 'images' });
+    const [s] = normalizeConfig(input).sources;
+
+    assert.deepEqual(pathsFor(s, '/tmp/build'), {
+      folder: path.join('/tmp/build/pugs'),
+      dataPath: path.join('/tmp/build/pugs/pugs.json'),
+      assetPath: path.join('/tmp/build/pugs/images')
+    });
+  });
 });
