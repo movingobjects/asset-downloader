@@ -1,7 +1,7 @@
 {
   "name": "asset-sync",
   "version": "1.0.0",
-  "description": "Syncs JSON data sources and the assets they reference into a project",
+  "description": "Standalone companion app that syncs JSON data sources and their assets into a kiosk app's data folder",
   "type": "module",
   "bin": {
     "asset-sync": "asset-sync.js"
@@ -14,8 +14,7 @@
     "lib"
   ],
   "scripts": {
-    "start": "node asset-sync.js",
-    "test": "node --test"
+    "start": "node asset-sync.js"
   },
   "repository": {
     "type": "git",

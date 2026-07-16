@@ -1,28 +1,31 @@
 # Asset Sync
 
-Command-line tool that downloads data and asset updates for kiosk applications. Tell it a URL and which JSON fields hold asset URLs, and it gives you a folder your app can read offline.
+Standalone command-line tool that keeps data and assets in sync for kiosk applications. You provide the JSON URLs and which fields hold asset URLs, and it gives you a folder of data and assets your app can read offline.
 
-A source is only written into your project if every one of its assets downloaded intact — see [All or nothing](#all-or-nothing-per-source).
+Asset sync is meant to be scheduled to run nightly by the OS, allowing kiosk app content to be kept up-to-date without relying on a constant internet connection.
 
-## Adding it to a project
+The tool is built with safety in mind—it only overwrites the output folder after all assets download successfully. If anything fails, no content is overwritten and the kiosk uses the previous day's content.
 
-Install it as a dev dependency, pinned to a version tag:
+## Installation
+
+Clone the repo (pinned to a version tag) somewhere on the kiosk machine, and install its dependencies:
 
 ```bash
-npm install --save-dev github:belle-wissell/asset-sync#v1.0.0
+git clone --branch v1.0.0 https://github.com/belle-wissell/asset-sync
+cd asset-sync
+npm install
 ```
 
-Then add a script and run it:
+Run it once by hand to confirm it works:
 
 ```bash
-npm pkg set scripts.assets:sync=asset-sync
-npm run assets:sync
+node asset-sync.js
 ```
 
-The first run finds no config, so it writes a starter `asset-sync.config.json` into the project root and stops. Point that at your data sources, then run it again to sync — and again whenever you need fresh content:
+The first run finds no config, so it writes a starter `config.json` next to `asset-sync.js` and stops. Point that at your data sources, then run it again to sync:
 
 ```bash
-npm run assets:sync
+node asset-sync.js
 ```
 
 ## Configuration
@@ -56,13 +59,13 @@ c:/kiosk/stories/           ←  outputDir     folder for this source
 
 `outputDir` is the only path. `dataFile` and `assetFolder` are plain names that sit **directly inside it**, so `outputDir` is the one knob that moves the whole source at once.
 
-| Key           | Default     |                                                                                   |
-|---------------|-------------|-----------------------------------------------------------------------------------|
-| `url`         | *required*  | JSON endpoint to fetch                                                            |
-| `outputDir`   | *required*  | Folder for this source. Absolute, starting with `~`, or relative to your project. |
-| `dataFile`    | `data.json` | Name for the downloaded JSON                                                      |
-| `assetFolder` | `assets`    | Name of the folder for the downloaded assets                                      |
-| `assetFields` | *none*      | Fields in the JSON holding asset URLs. Omit it to download the JSON only.         |
+| Key           | Default     |                                                                                            |
+|---------------|-------------|--------------------------------------------------------------------------------------------|
+| `url`         | *required*  | JSON endpoint to fetch                                                                     |
+| `outputDir`   | *required*  | Folder for this source. Absolute, starting with `~`, or relative to the current directory. |
+| `dataFile`    | `data.json` | Name for the downloaded JSON                                                               |
+| `assetFolder` | `assets`    | Name of the folder for the downloaded assets                                               |
+| `assetFields` | *none*      | Fields in the JSON holding asset URLs. Omit it to download the JSON only.                  |
 
 Since only `url` and `outputDir` are required, the source above is more usually written:
 
@@ -181,7 +184,7 @@ assets/2-imagePath.jpg
 ## Options
 
 ```text
-  -c, --config <file>    Config file to read       (default: asset-sync.config.json)
+  -c, --config <file>    Config file to read       (default: config.json)
   -j, --json-only        Skip assets, JSON only
   -n, --concurrency <n>  Parallel downloads        (default: 8)
       --dry-run          Report without writing
@@ -191,38 +194,4 @@ assets/2-imagePath.jpg
 
 - `--json-only` refreshes the JSON files without touching the assets already on disk.
 - `--dry-run` reports exactly what would be fetched and written, without requesting a single asset or touching your disk.
-- `--config` names a file that must already exist. Only the default `asset-sync.config.json` is scaffolded when missing.
-
-## All or nothing, per source
-
-A source and its assets are written into the project **only if its JSON and every one of its assets arrives intact**. If anything fails — a dead endpoint, a 404, a connection that drops mid-file — we skip that source and move on to the next one. This is deliberate: old data that works beats new data that doesn't.
-
-Everything is downloaded to a temporary folder first and only copied into the project once the whole source is accounted for, so there is no moment when a half-updated source is live. Failures are reported with the URL and the reason, and the run exits `1` if any source was skipped.
-
-## Development
-
-```bash
-git clone https://github.com/belle-wissell/asset-sync
-cd asset-sync
-node --test
-node asset-sync.js --config asset-sync.config.example.json
-```
-
-| File                             | Contains                                                |
-|----------------------------------|---------------------------------------------------------|
-| [`asset-sync.js`](asset-sync.js) | CLI, and the stages of syncing one source               |
-| [`lib/assets.js`](lib/assets.js) | Finding asset URLs in JSON, naming them, rewriting them |
-| [`lib/config.js`](lib/config.js) | Reading and validating the config file                  |
-| [`lib/net.js`](lib/net.js)       | Fetching, retries, and the download pool                |
-| [`lib/log.js`](lib/log.js)       | Everything printed to the terminal                      |
-
-### Releasing
-
-Projects install this by git tag, so a release is a tag:
-
-```bash
-npm version minor        # bumps package.json and commits a v-tag
-git push --follow-tags
-```
-
-Projects pick up the new version when they choose to, by bumping the tag in their `package.json`. Nothing updates a kiosk behind your back.
+- `--config` names a file that must already exist. Only the default `config.json` is scaffolded when missing.

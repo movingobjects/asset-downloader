@@ -115,7 +115,10 @@ async function publish(staging, source, hasAssets) {
 
 // CLI
 
-const CONFIG_FILE = 'asset-sync.config.json';
+// The default config lives next to this script, not in process.cwd() — a scheduler-invoked
+// process has an unpredictable (or irrelevant) working directory.
+const APP_DIR = path.dirname(fileURLToPath(import.meta.url));
+const CONFIG_FILE = path.join(APP_DIR, 'config.json');
 
 const USAGE = `
   Usage: asset-sync [options]
@@ -123,10 +126,10 @@ const USAGE = `
   Downloads JSON data sources and the assets they reference, rewriting the
   asset URLs in the JSON to point at the local copies.
 
-  A source is only written to the project if every one of its assets downloads
-  cleanly. If any fails, that source is left untouched and the run exits 1.
+  A source is only written to its output folder if every one of its assets
+  downloads cleanly. If any fails, that source is left untouched and the run exits 1.
 
-  The first run in a project writes a starter ${CONFIG_FILE}
+  The first run finds no config, so it writes a starter ${CONFIG_FILE}
   and stops, so you can point it at your data sources.
 
   Options:
