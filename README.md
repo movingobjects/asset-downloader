@@ -2,9 +2,9 @@
 
 Standalone command-line tool that keeps data and assets in sync for kiosk applications. You provide the JSON URLs and which fields hold asset URLs, and it gives you a folder of data and assets your app can read offline.
 
-Asset sync is meant to be scheduled to run nightly by the OS, allowing kiosk app content to be kept up-to-date without relying on a constant internet connection.
+Local content is only updated after each source downloads successfully. If a file download fails, the source is skipped, leaving the existing content for the kiosk to use.
 
-The tool is built with safety in mind—it only overwrites the output folder after all assets download successfully. If anything fails, no content is overwritten and the kiosk uses the previous day's content.
+Syncing is meant to be scheduled to run nightly, keeping content up-to-date and allowing kiosk apps to run offline.
 
 ## Installation
 
@@ -22,7 +22,7 @@ Run it once by hand to confirm it works:
 node asset-sync.js
 ```
 
-The first run finds no config, so it writes a starter `config.json` next to `asset-sync.js` and stops. Point that at your data sources, then run it again to sync:
+If the first run finds no config, it writes a starter `config.json` next to `asset-sync.js` and stops. Point that at your data sources, then run it again to sync:
 
 ```bash
 node asset-sync.js
@@ -30,16 +30,16 @@ node asset-sync.js
 
 ## Configuration
 
-The config is a list of sources. One source is one JSON endpoint. Here is a source using every option:
+The config has one shared `outputDir`, plus a list of sources. One source is one JSON endpoint:
 
 ```json
 {
+  "outputDir": "c:/kiosk",
   "sources": [
     {
       "url": "https://example.com/api/stories",
-      "outputDir": "c:/kiosk/stories",
-      "dataFile": "data.json",
-      "assetFolder": "assets",
+      "dataFile": "stories.json",
+      "assetsFolder": "story-assets",
       "assetFields": ["stories.img"]
     }
   ]
@@ -51,49 +51,53 @@ The config is a list of sources. One source is one JSON endpoint. Here is a sour
 Each key controls one part of the path:
 
 ```text
-c:/kiosk/stories/           ←  outputDir     folder for this source
-├─ data.json                ←  dataFile      the downloaded JSON
-└─ assets/                  ←  assetFolder   folder for the downloaded assets
-   └─ stories-1-img.jpg     ←  assetFields   named after the field path that found it
+c:/kiosk/                    ←  outputDir      shared folder for every source
+├─ stories.json              ←  dataFile       the downloaded JSON
+└─ story-assets/             ←  assetsFolder   folder for the downloaded assets
+   └─ stories-1-img.jpg      ←  assetFields    named after the field path that found it
 ```
 
-`outputDir` is the only path. `dataFile` and `assetFolder` are plain names that sit **directly inside it**, so `outputDir` is the one knob that moves the whole source at once.
+`outputDir` is the only path, and every source shares it. `dataFile` and `assetsFolder` are plain names that sit **directly inside it**, so each source needs its own to avoid colliding with the others.
 
-| Key           | Default     |                                                                                            |
-|---------------|-------------|--------------------------------------------------------------------------------------------|
-| `url`         | *required*  | JSON endpoint to fetch                                                                     |
-| `outputDir`   | *required*  | Folder for this source. Absolute, starting with `~`, or relative to the current directory. |
-| `dataFile`    | `data.json` | Name for the downloaded JSON                                                               |
-| `assetFolder` | `assets`    | Name of the folder for the downloaded assets                                               |
-| `assetFields` | *none*      | Fields in the JSON holding asset URLs. Omit it to download the JSON only.                  |
+| Key            | Default    |                                                                                                    |
+|----------------|------------|----------------------------------------------------------------------------------------------------|
+| `outputDir`    | *required* | Shared folder for every source. Absolute, starting with `~`, or relative to the current directory. |
+| `url`          | *required* | JSON endpoint to fetch                                                                             |
+| `dataFile`     | *required* | Name for the downloaded JSON                                                                       |
+| `assetsFolder` | *required* | Name of the folder for the downloaded assets                                                       |
+| `assetFields`  | *none*     | Fields in the JSON holding asset URLs. Omit it to download the JSON only.                          |
 
-Since only `url` and `outputDir` are required, the source above is more usually written:
-
-```json
-{
-  "url": "https://example.com/api/stories",
-  "outputDir": "c:/kiosk/stories",
-  "assetFields": ["stories.img"]
-}
-```
-
-> **Note:** `assetFolder` is **emptied and rewritten** on every successful run. Everything around it is left alone.
+> **Note:** `dataFile` is rewritten and `assetsFolder` is **emptied and rewritten** on every successful run. Any other files within the `outputDir` are left alone.
 
 ### How JSON is rewritten
 
 The endpoint returns a story with an asset URL on the internet:
 
 ```json
-{ "stories": [{ "img": "https://cdn.example.com/x7f2.jpg" }] }
+{
+  "stories": [
+    {
+      "id": "uniqueId",
+      "img": "https://cdn.example.com/x7f2.jpg"
+    }
+  ]
+}
 ```
 
-The downloaded `c:/kiosk/stories/data.json` points at the copy on disk instead:
+The downloaded `c:/kiosk/stories.json` points at the copy on disk instead:
 
 ```json
-{ "stories": [{ "img": "assets/stories-1-img.jpg" }] }
+{
+  "stories": [
+    {
+      "id": "uniqueId",
+      "img": "stories-assets/stories-1-img.jpg"
+    }
+  ]
+}
 ```
 
-That path is always **relative to the JSON file**, and since the assets are a sibling folder, it is just `assetFolder` plus the file name. The two can't drift apart: change `assetFolder` to `"images"` and the folder on disk and the path in the JSON both become `images`.
+That path is always **relative to the JSON file**, and since the assets are a sibling folder, it is just `assetsFolder` plus the file name. The two can't drift apart: change `assetsFolder` to `"images"` and the folder on disk and the path in the JSON both become `images`.
 
 If your app reads the JSON off disk, the path works as-is. If it fetches the JSON over HTTP, resolve asset paths against the JSON's own URL — a browser would otherwise resolve them against the current page:
 

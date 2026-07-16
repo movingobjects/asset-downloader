@@ -58,7 +58,7 @@ async function syncSource(source, index, { config, tempDir, options }) {
 
   for (const ref of refs) {
     ref.tempDir = path.join(staging, 'assets');
-    ref.pathDir = source.assetFolder; // relative to outputDir, and so to the JSON file landing there
+    ref.pathDir = source.assetsFolder; // relative to outputDir, and so to the JSON file landing there
   }
 
   const jobs = groupByUrl(refs);
@@ -142,11 +142,13 @@ const USAGE = `
 `;
 
 const TEMPLATE = `{
+  "outputDir": "c:/kiosk/content",
   "sources": [
     {
       "url": "https://example.com/api/content",
-      "outputDir": "./public/content",
-      "assetFields": ["stories.img"]
+      "dataFile": "data.json",
+      "assetsFolder": "assets",
+      "assetFields": ["items.imagePath"]
     }
   ]
 }
