@@ -3,28 +3,34 @@
   "sources": [
     {
       "url": "https://dog.ceo/api/breed/bulldog/french/images/random",
-      "dataFile": "french-bulldogs.json",
-      "assetsFolder": "french-bulldogs",
-      "assetFields": [
-        "message"
-      ]
+      "outputFile": "french-bulldogs.json",
+      "assets": {
+        "outputFolder": "french-bulldogs",
+        "fields": [
+          "message"
+        ]
+      }
     },
     {
       "url": "https://dog.ceo/api/breed/pug/images/random",
-      "dataFile": "pugs.json",
-      "assetsFolder": "pugs",
-      "assetFields": [
-        "message"
-      ]
+      "outputFile": "pugs.json",
+      "assets": {
+        "outputFolder": "pugs",
+        "fields": [
+          "message"
+        ]
+      }
     },
     {
       "url": "https://api.nasa.gov/planetary/apod?api_key=DEMO_KEY",
-      "dataFile": "nasa-apod.json",
-      "assetsFolder": "nasa-apod",
-      "assetFields": [
-        "hdurl",
-        "url"
-      ]
+      "outputFile": "nasa-apod.json",
+      "assets": {
+        "outputFolder": "nasa-apod",
+        "fields": [
+          "hdurl",
+          "url"
+        ]
+      }
     }
   ]
 }

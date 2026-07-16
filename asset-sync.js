@@ -97,7 +97,7 @@ async function stage(staging, source, data, hasAssets) {
   await mkdir(staging, { recursive: true });
   if (hasAssets) await mkdir(path.join(staging, 'assets'), { recursive: true });
 
-  await writeFile(path.join(staging, source.dataFile), JSON.stringify(data, null, 2));
+  await writeFile(path.join(staging, source.outputFile), JSON.stringify(data, null, 2));
 }
 
 /** Moves a fully downloaded source into the project. */
@@ -110,7 +110,7 @@ async function publish(staging, source, hasAssets) {
     await cp(path.join(staging, 'assets'), source.assetPath, { recursive: true });
   }
 
-  await copyFile(path.join(staging, source.dataFile), source.dataPath);
+  await copyFile(path.join(staging, source.outputFile), source.outputPath);
 }
 
 // CLI
@@ -146,9 +146,11 @@ const TEMPLATE = `{
   "sources": [
     {
       "url": "https://example.com/api/content",
-      "dataFile": "data.json",
-      "assetsFolder": "assets",
-      "assetFields": ["items.imagePath"]
+      "outputFile": "data.json",
+      "assets": {
+        "outputFolder": "assets",
+        "fields": ["items.imagePath"]
+      }
     }
   ]
 }
